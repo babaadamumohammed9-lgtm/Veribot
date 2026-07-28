@@ -1,0 +1,22 @@
+import logging
+import sys
+from scheduler import start_scheduler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+if __name__ == "__main__":
+    logger.info("Starting Niger State News Bot...")
+    try:
+        start_scheduler()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
+        sys.exit(1)
