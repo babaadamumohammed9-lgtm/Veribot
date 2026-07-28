@@ -1,0 +1,416 @@
+Niger State news bot files
+I want to build a telegram bot for posting Niger state positive news in telegram channel 
+Using GitHub and railway, now give me the necessary file to use
+I'll help you create a Telegram bot that automatically posts positive news about Niger State to a Telegram channel. Here's a complete solution using Python, GitHub, and Railway.
+
+Project Structure
+text
+niger-state-news-bot/
+├── .env
+├── .gitignore
+├── requirements.txt
+├── bot.py
+├── config.py
+├── news_scraper.py
+├── scheduler.py
+└── README.md
+1. requirements.txt
+txt
+python-telegram-bot==20.7
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+schedule==1.2.0
+python-dotenv==1.0.0
+feedparser==6.0.10
+2. .env
+env
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+TELEGRAM_CHANNEL_ID=@your_channel_username
+NEWS_API_KEY=YOUR_NEWS_API_KEY_OPTIONAL
+3. .gitignore
+text
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.log
+.DS_Store
+4. config.py
+python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Config:
+    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+    TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
+    NEWS_API_KEY = os.getenv('NEWS_API_KEY', '')
+    
+    # Keywords for filtering Niger State news
+    KEYWORDS = [
+        'niger state', 'minna', 'bida', 'suleja', 'kontagora',
+        'niger nigeria', 'niger state government'
+    ]
+    
+    # Posting schedule (in hours)
+    POST_INTERVAL_HOURS = 6
+    
+    # Maximum news articles per fetch
+    MAX_ARTICLES = 5
+5. news_scraper.py
+python
+import requests
+from bs4 import BeautifulSoup
+import feedparser
+import logging
+from datetime import datetime, timedelta
+from config import Config
+import json
+import re
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class NewsScraper:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        self.positive_keywords = [
+            'development', 'achievement', 'success', 'progress', 'growth',
+            'improvement', 'launch', 'inaugurate', 'commission', 'award',
+            'empowerment', 'scholarship', 'investment', 'infrastructure',
+            'healthcare', 'education', 'agriculture', 'youth', 'women',
+            'peace', 'unity', 'celebration', 'milestone', 'record'
+        ]
+    
+    def search_niger_state_news(self):
+        """Search for Niger State news from multiple sources"""
+        articles = []
+        
+        # Source 1: Google News RSS (if available)
+        try:
+            google_news_url = f"https://news.google.com/rss/search?q=Niger+State+Nigeria&hl=en-US&gl=US&ceid=US:en"
+            feed = feedparser.parse(google_news_url)
+            for entry in feed.entries[:10]:
+                if self.is_positive_news(entry.title + " " + entry.summary):
+                    articles.append({
+                        'title': entry.title,
+                        'summary': entry.summary,
+                        'link': entry.link,
+                        'published': entry.published if hasattr(entry, 'published') else '',
+                        'source': 'Google News'
+                    })
+        except Exception as e:
+            logger.error(f"Error fetching from Google News: {e}")
+        
+        # Source 2: Local Nigerian news sites (example with Punch)
+        try:
+            punch_url = "https://punchng.com/topics/niger-state/"
+            response = self.session.get(punch_url, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                articles_found = soup.find_all('article', class_='post')
+                for article in articles_found[:5]:
+                    title_elem = article.find('h2')
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        link = title_elem.find('a')
+                        link = link.get('href') if link else ''
+                        summary = article.find('p')
+                        summary = summary.get_text(strip=True) if summary else ''
+                        
+                        if self.is_positive_news(title + " " + summary):
+                            articles.append({
+                                'title': title,
+                                'summary': summary,
+                                'link': link,
+                                'published': datetime.now().strftime('%Y-%m-%d'),
+                                'source': 'Punch'
+                            })
+        except Exception as e:
+            logger.error(f"Error fetching from Punch: {e}")
+        
+        # Source 3: Nigerian Tribune
+        try:
+            tribune_url = "https://tribuneonlineng.com/?s=niger+state"
+            response = self.session.get(tribune_url, timeout=10)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                articles_found = soup.find_all('article')
+                for article in articles_found[:5]:
+                    title_elem = article.find('h2') or article.find('h3')
+                    if title_elem:
+                        title = title_elem.get_text(strip=True)
+                        link = title_elem.find('a')
+                        link = link.get('href') if link else ''
+                        summary = article.find('p')
+                        summary = summary.get_text(strip=True) if summary else ''
+                        
+                        if self.is_positive_news(title + " " + summary):
+                            articles.append({
+                                'title': title,
+                                'summary': summary,
+                                'link': link,
+                                'published': datetime.now().strftime('%Y-%m-%d'),
+                                'source': 'Nigerian Tribune'
+                            })
+        except Exception as e:
+            logger.error(f"Error fetching from Tribune: {e}")
+        
+        # Remove duplicates based on title similarity
+        unique_articles = []
+        seen_titles = set()
+        for article in articles:
+            title_key = article['title'].lower()[:50]
+            if title_key not in seen_titles:
+                seen_titles.add(title_key)
+                unique_articles.append(article)
+        
+        return unique_articles[:Config.MAX_ARTICLES]
+    
+    def is_positive_news(self, text):
+        """Check if news is positive using keyword matching"""
+        text_lower = text.lower()
+        positive_score = sum(1 for keyword in self.positive_keywords if keyword.lower() in text_lower)
+        
+        # Check for negative keywords
+        negative_keywords = ['crime', 'kill', 'death', 'accident', 'corruption', 
+                           'scandal', 'crisis', 'violence', 'attack', 'flood', 
+                           'disaster', 'tragedy', 'protests', 'strike', 'collapse']
+        negative_score = sum(1 for keyword in negative_keywords if keyword.lower() in text_lower)
+        
+        # News is positive if positive score > negative score and positive score >= 1
+        return positive_score > negative_score and positive_score >= 1
+    
+    def format_news_message(self, articles):
+        """Format articles for Telegram message"""
+        if not articles:
+            return None
+        
+        message = "🌟 *Good News from Niger State!* 🌟\n\n"
+        message += f"📰 *{len(articles)} positive updates today*\n\n"
+        
+        for i, article in enumerate(articles, 1):
+            message += f"*{i}. {article['title']}*\n"
+            if article['summary']:
+                # Truncate summary if too long
+                summary = article['summary'][:200] + "..." if len(article['summary']) > 200 else article['summary']
+                message += f"{summary}\n"
+            message += f"🔗 [Read more]({article['link']})\n"
+            message += f"📌 Source: {article.get('source', 'News Source')}\n\n"
+        
+        message += "🤝 *Stay connected with developments in Niger State!*\n"
+        message += "#NigerState #PositiveNews #Nigeria"
+        
+        return message
+6. scheduler.py
+python
+import schedule
+import time
+import logging
+from datetime import datetime
+from bot import send_news_to_channel
+from config import Config
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def scheduled_news_post():
+    """Function to run scheduled news posting"""
+    logger.info(f"Running scheduled news post at {datetime.now()}")
+    try:
+        send_news_to_channel()
+        logger.info("Scheduled news post completed successfully")
+    except Exception as e:
+        logger.error(f"Error in scheduled news post: {e}")
+
+def start_scheduler():
+    """Start the scheduler"""
+    # Schedule posts every X hours
+    schedule.every(Config.POST_INTERVAL_HOURS).hours.do(scheduled_news_post)
+    
+    # Also run on startup
+    scheduled_news_post()
+    
+    logger.info(f"Scheduler started. Will post every {Config.POST_INTERVAL_HOURS} hours")
+    
+    while True:
+        try:
+            schedule.run_pending()
+            time.sleep(60)  # Check every minute
+        except KeyboardInterrupt:
+            logger.info("Scheduler stopped by user")
+            break
+        except Exception as e:
+            logger.error(f"Scheduler error: {e}")
+            time.sleep(60)
+7. bot.py
+python
+import logging
+from telegram import Bot, ParseMode
+from telegram.error import TelegramError
+from config import Config
+from news_scraper import NewsScraper
+import time
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize bot
+bot = Bot(token=Config.TELEGRAM_BOT_TOKEN)
+scraper = NewsScraper()
+
+def send_news_to_channel():
+    """Fetch news and send to Telegram channel"""
+    try:
+        # Fetch news
+        logger.info("Fetching Niger State news...")
+        articles = scraper.search_niger_state_news()
+        
+        if not articles:
+            logger.info("No positive news articles found")
+            return
+        
+        # Format message
+        message = scraper.format_news_message(articles)
+        if not message:
+            logger.info("No message to send")
+            return
+        
+        # Send to Telegram channel
+        logger.info(f"Sending {len(articles)} articles to channel...")
+        bot.send_message(
+            chat_id=Config.TELEGRAM_CHANNEL_ID,
+            text=message,
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=False
+        )
+        logger.info(f"Successfully sent {len(articles)} news articles to channel")
+        
+    except TelegramError as e:
+        logger.error(f"Telegram error: {e}")
+        if "bot was blocked" in str(e):
+            logger.error("Bot was blocked by user or channel")
+    except Exception as e:
+        logger.error(f"Unexpected error in send_news_to_channel: {e}")
+
+def test_send():
+    """Test function to send a single news message"""
+    logger.info("Testing news send...")
+    send_news_to_channel()
+    logger.info("Test completed")
+
+if __name__ == "__main__":
+    # If run directly, test the bot
+    test_send()
+8. main.py (Entry point)
+python
+import logging
+import sys
+from scheduler import start_scheduler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+if __name__ == "__main__":
+    logger.info("Starting Niger State News Bot...")
+    try:
+        start_scheduler()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Bot crashed: {e}")
+        sys.exit(1)
+9. README.md
+markdown
+# Niger State Positive News Telegram Bot
+
+A Telegram bot that automatically posts positive news about Niger State, Nigeria to a Telegram channel.
+
+## Features
+- Automatically scrapes positive news about Niger State from multiple sources
+- Filters out negative news using sentiment analysis
+- Posts to Telegram channel every 6 hours
+- Deployed on Railway with automatic updates
+
+## Setup
+
+### 1. Create a Telegram Bot
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot` and follow the instructions
+3. Copy your bot token
+
+### 2. Create a Telegram Channel
+1. Create a public channel for your news
+2. Add your bot as an administrator
+3. Get the channel username (e.g., `@nigerstateupdates`)
+
+### 3. Deploy on Railway
+
+1. Fork this repository to GitHub
+2. Go to [Railway.app](https://railway.app)
+3. Click "New Project" → "Deploy from GitHub repo"
+4. Select your forked repository
+5. Add environment variables:
+   - `TELEGRAM_BOT_TOKEN` = Your bot token
+   - `TELEGRAM_CHANNEL_ID` = Your channel username (e.g., `@nigerstateupdates`)
+
+### 4. Local Development
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/niger-state-news-bot.git
+cd niger-state-news-bot
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create .env file with your credentials
+cp .env.example .env
+# Edit .env with your credentials
+
+# Run the bot
+python main.py
+Configuration
+Edit config.py to customize:
+
+POST_INTERVAL_HOURS: How often to post news (default: 6 hours)
+
+MAX_ARTICLES: Maximum articles per post (default: 5)
+
+KEYWORDS: Keywords for finding Niger State news
+
+How It Works
+The bot searches for Niger State news from multiple sources
+
+Filters articles using positive keywords
+
+Formats the news into a beautiful Telegram message
+
+Posts automatically to your channel
+
+Contributing
+Feel free to contribute by:
+
+Adding more news sources
+
+Improving positive news detection
+
+Adding more features
+
+License
+MIT License
